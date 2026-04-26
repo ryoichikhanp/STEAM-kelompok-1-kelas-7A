@@ -400,15 +400,29 @@
     </div>
 
     <script>
+        // =======================================================================================
+        // KONFIGURASI DATABASE MILIK ANDA (WAJIB DIISI AGAR FILE TERLIHAT OLEH ORANG LAIN)
+        // Ikuti instruksi di panel Obrolan (Langkah 1 - Langkah 4) untuk mendapatkan kode ini
+        // =======================================================================================
+        const MY_FIREBASE_CONFIG = {
+            apiKey: "AIzaSyBwzI5PQC8xTphLk4vlmBRB_3ZS_oX8alo",
+            authDomain: "steam-kelompok-1-kelas-7a.firebaseapp.com",
+            projectId: "steam-kelompok-1-kelas-7a",
+            storageBucket: "steam-kelompok-1-kelas-7a.firebasestorage.app",
+            messagingSenderId: "913905772353",
+            appId: "1:913905772353:web:d5d9e548b0538bc122a3c0"
+        };
+        // =======================================================================================
+
         let isAdmin = false;
         let siteImages = {};
         let allFiles = [];
         let db = null;
         let auth = null;
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        
+        // App ID Konstan agar selalu membaca database yang sama di GitHub
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'steam-kelompok-1-app';
 
-        // --- SISTEM PENYIMPANAN LOKAL PERMANEN (INDEXEDDB) ---
-        // Memastikan file tidak hilang saat di-refresh walaupun database terputus di Google Sites
         const initDB = () => {
             return new Promise((resolve) => {
                 const request = indexedDB.open('SteamLocalDB', 1);
@@ -441,14 +455,12 @@
             });
         };
 
-        // Memuat data yang sudah tersimpan saat halaman baru dibuka
         window.addEventListener('DOMContentLoaded', async () => {
             const savedImages = await loadLocal('siteImages');
             const savedFiles = await loadLocal('allFiles');
             if(savedImages) { siteImages = savedImages; renderAllImages(); }
             if(savedFiles) { allFiles = savedFiles; renderSubjectFiles(); }
         });
-        // -----------------------------------------------------
 
         const compressImage = (base64Str) => {
             return new Promise((resolve) => {
@@ -615,16 +627,35 @@
 
         async function startSync() {
             try {
-                if (typeof __firebase_config !== 'undefined') {
-                    const config = JSON.parse(__firebase_config);
-                    if (!firebase.apps.length) firebase.initializeApp(config);
+                let configToUse = null;
+
+                // Cek apakah user sudah mengisi config Firebase pribadinya
+                if (MY_FIREBASE_CONFIG.apiKey !== "MASUKKAN_API_KEY_DISINI") {
+                    configToUse = MY_FIREBASE_CONFIG; // Mode Github (Public)
+                } 
+                // Jika belum, gunakan database bawaan sistem Canvas/Gemini (hanya berfungsi di web ini)
+                else if (typeof __firebase_config !== 'undefined') {
+                    configToUse = JSON.parse(__firebase_config);
+                }
+
+                if (configToUse) {
+                    if (!firebase.apps.length) firebase.initializeApp(configToUse);
                     auth = firebase.auth();
                     db = firebase.firestore();
 
-                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                        await auth.signInWithCustomToken(__initial_auth_token);
-                    } else {
-                        await auth.signInAnonymously();
+                    // FIX: Tangani error auth/configuration-not-found agar web tidak mati jika Anon Login belum diaktifkan
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await auth.signInWithCustomToken(__initial_auth_token).catch(async () => {
+                                await auth.signInAnonymously();
+                            });
+                        } else {
+                            await auth.signInAnonymously(); 
+                        }
+                    } catch (authError) {
+                        console.warn("⚠️ PERINGATAN FIREBASE:", authError.message);
+                        console.warn("Harap aktifkan opsi 'Anonymous' di menu Authentication > Sign-in method di dashboard Firebase Anda.");
+                        // Tetap biarkan script berlanjut agar fungsi lokal (IndexedDB) tidak rusak.
                     }
 
                     db.collection('artifacts').doc(appId).collection('public').doc('data').collection('site_images')
@@ -642,6 +673,8 @@
                           saveLocal('allFiles', allFiles);
                           renderSubjectFiles();
                       }, (err) => console.log("File Sync Error:", err));
+                } else {
+                    console.log("Menjalankan Mode Offline. Untuk Online (Github), silakan isi MY_FIREBASE_CONFIG.");
                 }
             } catch (err) {
                 console.error("Critical Sync Failure:", err);
@@ -658,7 +691,7 @@
                 try {
                     const compressedUrl = await compressImage(e.target.result);
                     siteImages[id] = compressedUrl;
-                    saveLocal('siteImages', siteImages); // Simpan ke storage memori lokal
+                    saveLocal('siteImages', siteImages); 
                     renderAllImages();
                     
                     if (db) {
@@ -667,7 +700,7 @@
                 } catch(err) { console.log(err); }
             };
             reader.readAsDataURL(file);
-            input.value = ''; // Reset agar bisa unggah file yang sama lagi
+            input.value = '';
         };
 
         window.deleteImage = async (id) => {
@@ -685,7 +718,6 @@
             if(!isAdmin || !input.files[0]) return;
             const file = input.files[0];
             
-            // FIX: Ukuran ditingkatkan menjadi 15MB
             if (file.size > 15 * 1024 * 1024) { 
                 const labelSpan = document.getElementById('upload-file-text');
                 const originalText = labelSpan.innerText;
@@ -710,7 +742,7 @@
                 }
 
                 allFiles.push({ id: newId, subject: sub, fileName: file.name, fileData: finalData });
-                saveLocal('allFiles', allFiles); // Simpan permanen secara lokal di perangkat
+                saveLocal('allFiles', allFiles); 
                 renderSubjectFiles();
 
                 if (db) {
@@ -725,17 +757,22 @@
                         console.error(error);
                         const labelSpan = document.getElementById('upload-file-text');
                         const originalText = labelSpan.innerText;
-                        labelSpan.innerText = "GAGAL TERSINKRONISASI KE SERVER";
-                        labelSpan.classList.add('text-red-500');
+                        
+                        // Pesan error diubah agar lebih informatif
+                        labelSpan.innerText = MY_FIREBASE_CONFIG.apiKey === "MASUKKAN_API_KEY_DISINI" 
+                            ? "TERSAMPAN DI LOKAL (ISI CONFIG DATABASE AGAR BISA ONLINE)"
+                            : "GAGAL TERSINKRONISASI KE SERVER";
+                            
+                        labelSpan.classList.add('text-orange-500');
                         setTimeout(() => {
                             labelSpan.innerText = originalText;
-                            labelSpan.classList.remove('text-red-500');
+                            labelSpan.classList.remove('text-orange-500');
                         }, 4000);
                     }
                 }
             };
             reader.readAsDataURL(file);
-            input.value = ''; // Reset
+            input.value = '';
         };
 
         window.deleteFile = async (id) => {
